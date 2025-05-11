@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { EditBookmarkModal } from './EditBookmarkModal';
 import { useCategories } from '@/hooks/useCategories';
@@ -20,20 +20,26 @@ interface BookmarkTableProps {
 }
 
 interface SearchFilter {
-  query: string;
+  title: string;
+  url: string;
   tags: string[];
-  categories: string[];
+  categoryIds: string[];
   dateRange: {
     start: string;
     end: string;
   };
   accessCount: {
-    min: number;
-    max: number;
+    min: string;
+    max: string;
   };
 }
 
-export const BookmarkTable: React.FC<BookmarkTableProps> = ({
+interface SavedFilter {
+  name: string;
+  filter: SearchFilter;
+}
+
+export const BookmarkTable = forwardRef<any, BookmarkTableProps>(({
   bookmarks,
   onUpdate,
   onDelete,
@@ -41,30 +47,35 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
   viewMode = 'table',
   clearToast,
   onBatchDeleteWithUndo
-}) => {
-  const { categories } = useCategories();
+}, ref) => {
+  const { categories, refresh: refreshCategories } = useCategories();
+  const safeBookmarks = Array.isArray(bookmarks) ? bookmarks : [];
+  const safeCategories = Array.isArray(categories) ? categories : [];
   const [sortKey, setSortKey] = useState<keyof BookmarkNode | 'category'>('title');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [selectedBookmark, setSelectedBookmark] = useState<BookmarkNode | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [searchFilter, setSearchFilter] = useState<SearchFilter>({
-    query: '',
+    title: '',
+    url: '',
     tags: [],
-    categories: [],
-    dateRange: {
-      start: '',
-      end: ''
-    },
-    accessCount: {
-      min: 0,
-      max: Infinity
-    }
+    categoryIds: ['all'],
+    dateRange: { start: '', end: '' },
+    accessCount: { min: '', max: '' }
   });
-  const [savedFilters, setSavedFilters] = useState<{ name: string; filter: SearchFilter }[]>([]);
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
   const [showSaveFilterModal, setShowSaveFilterModal] = useState(false);
   const [filterName, setFilterName] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showBulkAddTags, setShowBulkAddTags] = useState(false);
+  const [showBulkRemoveTags, setShowBulkRemoveTags] = useState(false);
+  const [showBulkMove, setShowBulkMove] = useState(false);
+  const [bulkTags, setBulkTags] = useState('');
+  const [bulkMoveFolderId, setBulkMoveFolderId] = useState('');
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [selectedBookmark, setSelectedBookmark] = useState<BookmarkNode | null>(null);
+  const isLoading = false;
   const [columnVisibility, setColumnVisibility] = useState<{ [key: string]: boolean }>({
     title: true,
     category: true,
@@ -98,21 +109,13 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
   const dragCol = useRef<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [tableZoom, setTableZoom] = useState(1);
-  const [isLoading] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBulkCategory, setShowBulkCategory] = useState(false);
-  const [showBulkAddTags, setShowBulkAddTags] = useState(false);
-  const [showBulkRemoveTags, setShowBulkRemoveTags] = useState(false);
-  const [showBulkMove, setShowBulkMove] = useState(false);
   const [bulkCategoryId, setBulkCategoryId] = useState('');
-  const [bulkTags, setBulkTags] = useState('');
-  const [bulkMoveFolderId, setBulkMoveFolderId] = useState('');
 
-  const safeBookmarks = Array.isArray(bookmarks) ? bookmarks : [];
-  const safeCategories = Array.isArray(categories) ? categories : [];
-
-  // Folders: all nodes of type 'folder'
-  const allFolders = safeBookmarks.filter(b => b.type === 'folder');
+  // Add a type guard for bookmarks
+  function isBookmark(node: BookmarkNode): node is BookmarkNode & { categoryId?: string } {
+    return node.type === 'bookmark';
+  }
 
   const handleSort = (key: keyof BookmarkNode | 'category') => {
     if (key === sortKey) {
@@ -123,35 +126,143 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
     }
   };
 
+  const handleSaveFilter = () => {
+    if (filterName.trim()) {
+      const newFilters = [...savedFilters, { name: filterName, filter: searchFilter }];
+      setSavedFilters(newFilters);
+      setShowSaveFilterModal(false);
+      setFilterName('');
+    }
+  };
+
+  const handleDeleteFilter = (name: string) => {
+    setSavedFilters(savedFilters.filter(f => f.name !== name));
+  };
+
+  // Load saved filters from storage
+  useEffect(() => {
+    chrome.storage.local.get('savedFilters', (data) => {
+      if (data.savedFilters) {
+        setSavedFilters(data.savedFilters);
+      }
+    });
+  }, []);
+
+  // Save filters to storage
+  useEffect(() => {
+    chrome.storage.local.set({ savedFilters });
+  }, [savedFilters]);
+
+  // Restore searchFilter and showAdvancedSearch on mount
+  useEffect(() => {
+    chrome.storage.local.get(['activeSearchFilter', 'showAdvancedSearch'], (data) => {
+      if (data.activeSearchFilter && typeof data.activeSearchFilter === 'object') {
+        setSearchFilter(data.activeSearchFilter);
+        // Ensure we show advanced search if there's an active filter
+        const filter = data.activeSearchFilter as SearchFilter;
+        if (Object.values(filter).some(value => {
+          if (Array.isArray(value)) return value.length > 0;
+          if (typeof value === 'object' && value !== null) {
+            return Object.values(value).some(v => v !== '' && v !== 0 && v !== Infinity);
+          }
+          return value !== '';
+        })) {
+          setShowAdvancedSearch(true);
+        }
+      }
+      if (typeof data.showAdvancedSearch === 'boolean') {
+        setShowAdvancedSearch(data.showAdvancedSearch);
+      }
+    });
+  }, []);
+
+  // Persist searchFilter and showAdvancedSearch on change
+  useEffect(() => {
+    chrome.storage.local.set({ activeSearchFilter: searchFilter, showAdvancedSearch });
+  }, [searchFilter, showAdvancedSearch]);
+
   const filtered = useMemo(() => {
     return safeBookmarks.filter(bm => {
-      // Basic search query
-      const matchesQuery = !searchFilter.query || 
-        bm.title.toLowerCase().includes(searchFilter.query.toLowerCase()) ||
-        (bm.url || '').toLowerCase().includes(searchFilter.query.toLowerCase()) ||
-        (safeCategories.find(c => c.id === bm.categoryId)?.name || '').toLowerCase().includes(searchFilter.query.toLowerCase());
+      // Basic search term filter
+      if (searchTerm) {
+        const matchesSearch = 
+          (bm.title?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+          (bm.url?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+          (bm.tags && bm.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())));
+        if (!matchesSearch) return false;
+      }
 
-      // Tags filter
-      const matchesTags = searchFilter.tags.length === 0 || 
-        searchFilter.tags.every(tag => bm.tags?.includes(tag));
+      // Advanced filters
+      if (showAdvancedSearch) {
+        // Title filter
+        if (searchFilter.title && !(bm.title?.toLowerCase() || '').includes(searchFilter.title.toLowerCase())) {
+          return false;
+        }
 
-      // Categories filter
-      const matchesCategories = searchFilter.categories.length === 0 || 
-        searchFilter.categories.includes(bm.categoryId || '');
+        // URL filter
+        if (searchFilter.url && !(bm.url?.toLowerCase() || '').includes(searchFilter.url.toLowerCase())) {
+          return false;
+        }
 
-      // Date range filter
-      const createdAt = new Date(bm.createdAt || '').getTime();
-      const startDate = searchFilter.dateRange.start ? new Date(searchFilter.dateRange.start).getTime() : 0;
-      const endDate = searchFilter.dateRange.end ? new Date(searchFilter.dateRange.end).getTime() : Infinity;
-      const matchesDateRange = createdAt >= startDate && createdAt <= endDate;
+        // Tags filter
+        if (searchFilter.tags.length > 0) {
+          if (searchFilter.tags.includes('empty') && (!bm.tags || bm.tags.length === 0)) {
+            return true;
+          }
+          if (!bm.tags || !searchFilter.tags.some(tag => bm.tags?.includes(tag))) {
+            return false;
+          }
+        }
 
-      // Access count filter
-      const matchesAccessCount = (bm.accessCount || 0) >= searchFilter.accessCount.min && 
-        (bm.accessCount || 0) <= searchFilter.accessCount.max;
+        // Category filter
+        if (
+          searchFilter.categoryIds.length > 0 &&
+          !searchFilter.categoryIds.includes('all')
+        ) {
+          if (
+            searchFilter.categoryIds.includes('uncategorized') &&
+            (!bm.categoryId || bm.categoryId === '' || bm.categoryId === 'uncategorized')
+          ) {
+            return true;
+          }
+          if (
+            bm.categoryId &&
+            !searchFilter.categoryIds.includes(bm.categoryId)
+          ) {
+            return false;
+          }
+          if (
+            !searchFilter.categoryIds.includes('uncategorized') &&
+            (!bm.categoryId || bm.categoryId === '' || bm.categoryId === 'uncategorized')
+          ) {
+            return false;
+          }
+        }
 
-      return matchesQuery && matchesTags && matchesCategories && matchesDateRange && matchesAccessCount;
+        // Date range filter
+        if (searchFilter.dateRange.start || searchFilter.dateRange.end) {
+          const createdAt = new Date(bm.createdAt || '').getTime();
+          const start = searchFilter.dateRange.start ? new Date(searchFilter.dateRange.start).getTime() : 0;
+          const end = searchFilter.dateRange.end ? new Date(searchFilter.dateRange.end).getTime() : Infinity;
+          if (createdAt < start || createdAt > end) {
+            return false;
+          }
+        }
+
+        // Access count filter
+        if (searchFilter.accessCount.min || searchFilter.accessCount.max) {
+          const count = bm.accessCount || 0;
+          const min = searchFilter.accessCount.min ? parseInt(searchFilter.accessCount.min) : 0;
+          const max = searchFilter.accessCount.max ? parseInt(searchFilter.accessCount.max) : Infinity;
+          if (count < min || count > max) {
+            return false;
+          }
+        }
+      }
+
+      return true;
     });
-  }, [safeBookmarks, searchFilter, safeCategories]);
+  }, [safeBookmarks, searchTerm, showAdvancedSearch, searchFilter]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -159,8 +270,8 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
       let valB: any;
       switch (sortKey) {
         case 'title':
-          valA = a.title.toLowerCase();
-          valB = b.title.toLowerCase();
+          valA = a.title?.toLowerCase() || '';
+          valB = b.title?.toLowerCase() || '';
           break;
         case 'url':
           valA = (a.url || '').toLowerCase();
@@ -363,43 +474,6 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
     chrome.storage.local.set({ tableZoom });
   }, [tableZoom]);
 
-  // Load saved filters from storage
-  useEffect(() => {
-    chrome.storage.local.get('savedFilters', (data) => {
-      if (data.savedFilters) {
-        setSavedFilters(data.savedFilters);
-      }
-    });
-  }, []);
-
-  // Save filters to storage
-  useEffect(() => {
-    chrome.storage.local.set({ savedFilters });
-  }, [savedFilters]);
-
-  const handleSaveFilter = () => {
-    if (filterName.trim()) {
-      const newFilters = [...savedFilters, { name: filterName, filter: searchFilter }];
-      setSavedFilters(newFilters);
-      setShowSaveFilterModal(false);
-      setFilterName('');
-    }
-  };
-
-  const handleLoadFilter = (filter: SearchFilter) => {
-    setSearchFilter(filter);
-    setShowAdvancedSearch(true);
-  };
-
-  const handleDeleteFilter = (name: string) => {
-    setSavedFilters(savedFilters.filter(f => f.name !== name));
-  };
-
-  // Add a type guard for bookmarks
-  function isBookmark(node: BookmarkNode): node is BookmarkNode & { categoryId?: string } {
-    return node.type === 'bookmark';
-  }
-
   // Helper to get column label
   const columnLabels: { [key: string]: string } = {
     title: 'Title',
@@ -527,6 +601,36 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
     clearSelection();
   };
 
+  const handleAccessCountMinChange = (value: string) => {
+    setSearchFilter(prev => ({
+      ...prev,
+      accessCount: {
+        ...prev.accessCount,
+        min: value
+      }
+    }));
+  };
+
+  const handleAccessCountMaxChange = (value: string) => {
+    setSearchFilter(prev => ({
+      ...prev,
+      accessCount: {
+        ...prev.accessCount,
+        max: value
+      }
+    }));
+  };
+
+  const handleCategoryChange = (selected: string[]) => {
+    if (selected.includes('all')) {
+      setSearchFilter(prev => ({ ...prev, categoryIds: ['all'] }));
+    } else if (selected.length === 0) {
+      setSearchFilter(prev => ({ ...prev, categoryIds: ['all'] }));
+    } else {
+      setSearchFilter(prev => ({ ...prev, categoryIds: selected.filter(id => id !== 'all') }));
+    }
+  };
+
   if (isLoading) {
     return <LoadingSpinner size="lg" className="mt-8" />;
   }
@@ -540,6 +644,10 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
       />
     );
   }
+
+  useImperativeHandle(ref, () => ({
+    refreshCategories,
+  }));
 
   return (
     <div className="w-full">
@@ -577,6 +685,7 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
                   }}
                   className="w-full rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
                 >
+                  <option value="__empty__">Empty Tags</option>
                   {Array.from(new Set(safeBookmarks.flatMap(b => b.tags || []))).map(tag => (
                     <option key={tag} value={tag}>{tag}</option>
                   ))}
@@ -588,15 +697,14 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Categories</label>
                 <select
                   multiple
-                  value={searchFilter.categories}
-                  onChange={(e) => {
-                    const selected = Array.from(e.target.selectedOptions, option => option.value);
-                    setSearchFilter(prev => ({ ...prev, categories: selected }));
-                  }}
+                  value={searchFilter.categoryIds}
+                  onChange={e => handleCategoryChange(Array.from(e.target.selectedOptions, option => option.value))}
                   className="w-full rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
                 >
-                  {safeCategories.map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  <option value="all">All Categories</option>
+                  <option value="uncategorized">Uncategorized</option>
+                  {safeCategories.map(category => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
                   ))}
                 </select>
               </div>
@@ -634,22 +742,16 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
                   <input
                     type="number"
                     value={searchFilter.accessCount.min}
-                    onChange={(e) => setSearchFilter(prev => ({
-                      ...prev,
-                      accessCount: { ...prev.accessCount, min: parseInt(e.target.value) || 0 }
-                    }))}
+                    onChange={(e) => handleAccessCountMinChange(e.target.value)}
                     placeholder="Min"
-                    className="w-full rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                    className="w-24 px-2 py-1 border rounded"
                   />
                   <input
                     type="number"
-                    value={searchFilter.accessCount.max === Infinity ? '' : searchFilter.accessCount.max}
-                    onChange={(e) => setSearchFilter(prev => ({
-                      ...prev,
-                      accessCount: { ...prev.accessCount, max: parseInt(e.target.value) || Infinity }
-                    }))}
+                    value={searchFilter.accessCount.max}
+                    onChange={(e) => handleAccessCountMaxChange(e.target.value)}
                     placeholder="Max"
-                    className="w-full rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                    className="w-24 px-2 py-1 border rounded"
                   />
                 </div>
               </div>
@@ -663,7 +765,7 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
                   {savedFilters.map(({ name, filter }) => (
                     <div key={name} className="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 rounded px-3 py-1">
                       <button
-                        onClick={() => handleLoadFilter(filter)}
+                        onClick={() => setSearchFilter(filter)}
                         className="text-blue-600 dark:text-blue-400 hover:underline"
                       >
                         {name}
@@ -722,8 +824,8 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
             <input
               type="text"
               placeholder="Search bookmarks..."
-              value={searchFilter.query}
-              onChange={(e) => setSearchFilter(prev => ({ ...prev, query: e.target.value }))}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className={`flex-1 min-w-0 px-3 py-2 border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-green-400 text-base ${
                 document.documentElement.classList.contains('dark')
                   ? 'text-white placeholder-gray-400'
@@ -740,7 +842,7 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
             <button className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700" onClick={() => setShowBulkCategory(true)}>Assign Category</button>
             <button className="px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => setShowBulkAddTags(true)}>Add Tags</button>
             <button className="px-3 py-1 rounded bg-yellow-600 text-white hover:bg-yellow-700" onClick={() => setShowBulkRemoveTags(true)}>Remove Tags</button>
-            {allFolders.length > 0 && (
+            {safeBookmarks.filter(b => b.type === 'folder').length > 0 && (
               <button className="px-3 py-1 rounded bg-purple-600 text-white hover:bg-purple-700" onClick={() => setShowBulkMove(true)}>Move to Folder</button>
             )}
             <button className="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700" onClick={handleBulkDelete}>Delete</button>
@@ -818,7 +920,7 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
                 className="block w-full rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white mb-4"
               >
                 <option value="">Select a folder</option>
-                {allFolders.map(folder => (
+                {safeBookmarks.filter(b => b.type === 'folder').map(folder => (
                   <option key={folder.id} value={folder.id}>{folder.title}</option>
                 ))}
               </select>
@@ -1048,8 +1150,12 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
                             case 'category':
                               return (
                                 <td key="category" className="px-6 py-4 whitespace-nowrap">
-                                  {isBookmark(bookmark) && bookmark.categoryId && (
-                                    <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" style={{}}>{safeCategories.find(c => c.id === bookmark.categoryId)?.name || 'Uncategorized'}</span>
+                                  {isBookmark(bookmark) && (
+                                    <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" style={{}}>
+                                      {bookmark.categoryId && bookmark.categoryId !== 'uncategorized'
+                                        ? safeCategories.find(c => c.id === bookmark.categoryId)?.name || 'Uncategorized'
+                                        : 'Uncategorized'}
+                                    </span>
                                   )}
                                 </td>
                               );
@@ -1217,4 +1323,7 @@ export const BookmarkTable: React.FC<BookmarkTableProps> = ({
       )}
     </div>
   );
-}; 
+});
+
+// Add prop type for refreshCategories
+(BookmarkTable as any).refreshCategories = true; 

@@ -10,8 +10,9 @@ export function useBookmarks() {
   const fetchBookmarks = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await BookmarkService.getBookmarks();
-      setBookmarks(data);
+      const data = await chrome.storage.local.get(['bookmarks']);
+      const loadedBookmarks = Array.isArray(data.bookmarks) ? data.bookmarks : [];
+      setBookmarks(loadedBookmarks);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch bookmarks');
@@ -55,7 +56,7 @@ export function useBookmarks() {
     try {
       const success = await BookmarkService.deleteBookmarkNode(id);
       if (success) {
-        setBookmarks(prev => prev.filter(b => b.id !== id && b.parentId !== id)); // Remove node and direct children (UI will be updated recursively)
+        setBookmarks(prev => prev.filter(b => b.id !== id && b.parentId !== id));
       }
       return success;
     } catch (err) {

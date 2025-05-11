@@ -6,7 +6,11 @@ import { StorageService } from '@/services/storageService';
 
 const defaultIcons = ['📁', '🔖', '⭐', '📚', '🗂️', '📝', '💡', '🔗', '🔥', '💻', '🌐', '📅', '📊', '🛠️', '🎨', '🧩', '🧠', '🦄', '🚀', '🎵', '📷', '🧑‍💻', '🧑‍🏫', '🧑‍🔬', '🧑‍🎨', '🧑‍🚀', '🧑‍🍳', '🧑‍🌾', '🧑‍🎤', '🧑‍🎓', '🧑‍⚖️', '🧑‍✈️', '🧑‍🚒', '🧑‍🔧', '🧑‍🏭', '🧑‍💼', '🧑‍🔬', '🧑‍🎨', '🧑‍🚀', '🧑‍🍳', '🧑‍🌾', '🧑‍🎤', '🧑‍🎓', '🧑‍⚖️', '🧑‍✈️', '🧑‍🚒', '🧑‍🔧', '🧑‍🏭', '🧑‍💼'];
 
-export const CategoryManager: React.FC = () => {
+interface CategoryManagerProps {
+  onCategoryChange?: () => void;
+}
+
+export const CategoryManager: React.FC<CategoryManagerProps> = ({ onCategoryChange }) => {
   const [categories, setCategories] = useState<BookmarkCategory[]>([]);
   const [name, setName] = useState('');
   const [color, setColor] = useState('#6366f1'); // default indigo-500
@@ -28,6 +32,7 @@ export const CategoryManager: React.FC = () => {
     setColor('#6366f1');
     setIcon(defaultIcons[0]);
     BookmarkService.getCategories().then(setCategories);
+    if (onCategoryChange) onCategoryChange();
     setLoading(false);
   };
 
@@ -36,6 +41,7 @@ export const CategoryManager: React.FC = () => {
     const updatedCategories = categoriesList.filter(cat => cat.id !== catId);
     await StorageService.set('bookmark_categories', updatedCategories);
     BookmarkService.getCategories().then(setCategories);
+    if (onCategoryChange) onCategoryChange();
   };
 
   const openEditModal = (cat: BookmarkCategory) => {
@@ -58,6 +64,7 @@ export const CategoryManager: React.FC = () => {
       await StorageService.set('bookmark_categories', updatedCategories);
       closeEditModal();
       BookmarkService.getCategories().then(setCategories);
+      if (onCategoryChange) onCategoryChange();
     }
   };
 

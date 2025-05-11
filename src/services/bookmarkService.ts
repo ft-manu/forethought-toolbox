@@ -1,12 +1,4 @@
 import { BookmarkNode, BookmarkCategory } from '@/types/bookmark';
-import { StorageService } from './storageService';
-
-interface Category {
-  id: string;
-  name: string;
-  color: string;
-  icon: string;
-}
 
 export class BookmarkService {
   private static readonly STORAGE_KEY = 'bookmarks';
@@ -14,8 +6,9 @@ export class BookmarkService {
 
   static async getBookmarks(): Promise<BookmarkNode[]> {
     try {
-      const data = await StorageService.get(this.STORAGE_KEY);
-      return Array.isArray(data) ? data : [];
+      const data = await chrome.storage.local.get([this.STORAGE_KEY]);
+      const bookmarks = data[this.STORAGE_KEY];
+      return Array.isArray(bookmarks) ? bookmarks : [];
     } catch (error) {
       console.error('Failed to fetch bookmarks:', error);
       return [];
@@ -32,7 +25,7 @@ export class BookmarkService {
       accessCount: node.type === 'bookmark' ? 0 : undefined,
     };
     const updatedBookmarks = [...bookmarks, newNode];
-    await StorageService.set(this.STORAGE_KEY, updatedBookmarks);
+    await chrome.storage.local.set({ [this.STORAGE_KEY]: updatedBookmarks });
     return newNode;
   }
 
@@ -47,7 +40,7 @@ export class BookmarkService {
         lastAccessed: updates.type === 'bookmark' ? new Date().toISOString() : undefined,
       } as BookmarkNode;
       const updatedBookmarks = [...bookmarks, restoredNode];
-      await StorageService.set(this.STORAGE_KEY, updatedBookmarks);
+      await chrome.storage.local.set({ [this.STORAGE_KEY]: updatedBookmarks });
       return restoredNode;
     }
     const updatedNode = {
@@ -56,7 +49,7 @@ export class BookmarkService {
       lastAccessed: bookmarks[index].type === 'bookmark' ? new Date().toISOString() : undefined,
     };
     bookmarks[index] = updatedNode;
-    await StorageService.set(this.STORAGE_KEY, bookmarks);
+    await chrome.storage.local.set({ [this.STORAGE_KEY]: bookmarks });
     return updatedNode;
   }
 
@@ -78,14 +71,15 @@ export class BookmarkService {
     const updatedBookmarks = bookmarks.filter(b => !toDelete.has(b.id));
     changed = updatedBookmarks.length !== bookmarks.length;
     if (!changed) return false;
-    await StorageService.set(this.STORAGE_KEY, updatedBookmarks);
+    await chrome.storage.local.set({ [this.STORAGE_KEY]: updatedBookmarks });
     return true;
   }
 
   static async getCategories(): Promise<BookmarkCategory[]> {
     try {
-      const data = await StorageService.get(this.CATEGORY_KEY);
-      return Array.isArray(data) ? data : [];
+      const data = await chrome.storage.local.get([this.CATEGORY_KEY]);
+      const categories = data[this.CATEGORY_KEY];
+      return Array.isArray(categories) ? categories : [];
     } catch (error) {
       console.error('Failed to fetch categories:', error);
       return [];
@@ -97,13 +91,13 @@ export class BookmarkService {
     const newCategory = { id, ...category };
     
     // Get existing categories
-    const { bookmark_categories = [] } = await chrome.storage.local.get('bookmark_categories');
+    const categories = await this.getCategories();
     
     // Add new category
-    const updatedCategories = [...bookmark_categories, newCategory];
+    const updatedCategories = [...categories, newCategory];
     
     // Save to storage
-    await chrome.storage.local.set({ bookmark_categories: updatedCategories });
+    await chrome.storage.local.set({ [this.CATEGORY_KEY]: updatedCategories });
     
     return id;
   }
@@ -120,24 +114,24 @@ export class BookmarkService {
     };
 
     categories[index] = updatedCategory;
-    await StorageService.set(this.CATEGORY_KEY, categories);
+    await chrome.storage.local.set({ [this.CATEGORY_KEY]: categories });
     return updatedCategory;
   }
 
   static async deleteCategory(id: string): Promise<void> {
-    const { bookmark_categories = [] } = await chrome.storage.local.get('bookmark_categories');
-    const updatedCategories = bookmark_categories.filter((cat: Category) => cat.id !== id);
-    await chrome.storage.local.set({ bookmark_categories: updatedCategories });
+    const categories = await this.getCategories();
+    const updatedCategories = categories.filter(cat => cat.id !== id);
+    await chrome.storage.local.set({ [this.CATEGORY_KEY]: updatedCategories });
   }
 
   static async updateBookmarkCategory(bookmarkId: string, categoryId: string | null): Promise<void> {
-    const { bookmarks = [] } = await chrome.storage.local.get('bookmarks');
+    const bookmarks = await this.getBookmarks();
     const updatedBookmarks = bookmarks.map((bookmark: BookmarkNode) => {
       if (bookmark.id === bookmarkId) {
         return { ...bookmark, categoryId };
       }
       return bookmark;
     });
-    await chrome.storage.local.set({ bookmarks: updatedBookmarks });
+    await chrome.storage.local.set({ [this.STORAGE_KEY]: updatedBookmarks });
   }
 } 

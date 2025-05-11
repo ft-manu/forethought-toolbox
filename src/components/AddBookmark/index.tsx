@@ -26,6 +26,43 @@ export const AddBookmark: React.FC<AddBookmarkProps> = ({ onClose, parentId = nu
   // Get all unique tags from existing bookmarks
   const allTags = Array.from(new Set(bookmarks.flatMap(b => b.tags || [])));
 
+  // Key for storing form state
+  const FORM_STATE_KEY = 'addBookmarkFormState';
+
+  // Restore form state on mount
+  useEffect(() => {
+    chrome.storage.local.get([FORM_STATE_KEY], (data) => {
+      const saved = data[FORM_STATE_KEY];
+      if (saved) {
+        setTitle(saved.title || '');
+        setUrl(saved.url || '');
+        setTags(saved.tags || []);
+        setTagInput(saved.tagInput || '');
+        setDescription(saved.description || '');
+        setCategoryId(saved.categoryId || '');
+      }
+    });
+  }, []);
+
+  // Persist form state on change
+  useEffect(() => {
+    chrome.storage.local.set({
+      [FORM_STATE_KEY]: {
+        title,
+        url,
+        tags,
+        tagInput,
+        description,
+        categoryId,
+      },
+    });
+  }, [title, url, tags, tagInput, description, categoryId]);
+
+  // Clear form state from storage
+  const clearFormState = () => {
+    chrome.storage.local.remove(FORM_STATE_KEY);
+  };
+
   // Analyze URL and title for smart suggestions
   const getSmartSuggestions = () => {
     const suggestions = {
@@ -117,6 +154,7 @@ export const AddBookmark: React.FC<AddBookmarkProps> = ({ onClose, parentId = nu
       setDescription('');
       setTags([]);
       setCategoryId('');
+      clearFormState();
       if (onBookmarkAdded) onBookmarkAdded();
       onClose();
     } catch (err) {
@@ -124,6 +162,12 @@ export const AddBookmark: React.FC<AddBookmarkProps> = ({ onClose, parentId = nu
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Also clear form state when closing without submitting
+  const handleClose = () => {
+    clearFormState();
+    onClose();
   };
 
   const handleAddTag = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -307,7 +351,7 @@ export const AddBookmark: React.FC<AddBookmarkProps> = ({ onClose, parentId = nu
         <div className="flex justify-end space-x-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className={`px-4 py-2 text-sm font-medium rounded-md border transition focus:outline-none focus:ring-2 focus:ring-green-400 ${
               document.documentElement.classList.contains('dark')
                 ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'

@@ -666,14 +666,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             imported: true // Tag as imported
           }));
           await chrome.storage.local.set({ bookmarks: processedBookmarks });
-          toast.success('Bookmarks imported successfully ✅', { duration: 3000 });
+          toast.success('Bookmarks imported successfully ✅');
           // Force a reload of the bookmarks in all views
           window.location.reload();
         } else {
-          toast.error('Invalid format. Expected an array of bookmarks.', { duration: 3000 });
+          toast.error('Invalid format. Expected an array of bookmarks.');
         }
       } catch (err) {
-        toast.error('Failed to parse JSON: ' + (err instanceof Error ? err.message : String(err)), { duration: 3000 });
+        toast.error('Failed to parse JSON: ' + (err instanceof Error ? err.message : String(err)));
       }
     };
     reader.readAsText(file);
@@ -726,11 +726,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     <div className={`fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center ${isOpen ? '' : 'hidden'}`} onClick={onClose}>
       <div
         ref={modalRef}
-        className={`bg-white dark:bg-gray-900 rounded-lg shadow-lg p-6 min-w-[320px] max-w-[90vw] relative ${currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}`}
+        className={`bg-white dark:bg-gray-900 rounded-lg shadow-lg p-6 min-w-[320px] max-w-lg w-full max-h-screen overflow-y-auto relative ${currentTheme === 'dark' ? 'text-white' : 'text-gray-900'}`}
         onClick={e => e.stopPropagation()}
         style={{ transition: 'background-color 0.2s' }}
       >
-        <button className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300" onClick={onClose} title="Close settings">&times;</button>
+        <button className="absolute top-2 right-2 z-50 text-2xl text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 bg-white/80 dark:bg-gray-900/80 rounded-full w-8 h-8 flex items-center justify-center" onClick={onClose} title="Close settings">&times;</button>
         <h2 className="text-lg font-bold mb-4">Settings</h2>
         
         {/* Theme Section (always at the top) */}
@@ -753,21 +753,230 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         {/* Import/Export Bookmarks Section (now below Theme, above Manual Backup) */}
         <div className="mb-6 p-4 bg-blue-50 dark:bg-gray-800 rounded-lg">
           <label className="block text-sm font-medium mb-2">📁 Import/Export Bookmarks</label>
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex gap-3 flex-wrap w-full">
             <button
-              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium"
+              className="flex-1 min-w-0 flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium"
               onClick={handleExport}
               title="Export bookmarks as JSON file"
             >
               📤 Export Bookmarks as JSON
             </button>
-            <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium relative overflow-hidden cursor-pointer" title="Import bookmarks from JSON file">
+            <label className="flex-1 min-w-0 flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium relative overflow-hidden cursor-pointer" title="Import bookmarks from JSON file">
               📥 Import Bookmarks from JSON
               <input
                 type="file"
                 accept="application/json"
                 className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
                 onChange={handleImport}
+              />
+            </label>
+            {/* Import Browser Bookmarks via HTML */}
+            <label className="flex-1 min-w-0 flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium relative overflow-hidden cursor-pointer" title="Import browser bookmarks from HTML file">
+              🌐 Import Browser Bookmarks (HTML)
+              <input
+                type="file"
+                accept=".html"
+                className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const text = await file.text();
+                    console.log("Parsing HTML file:", file.name);
+                    
+                    // Add a debugging snippet to show the raw text content of the file
+                    console.log("Raw file preview (first 1000 chars):", text.substring(0, 1000));
+                    
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(text, 'text/html');
+                    
+                    // Debug the structure
+                    console.log("HTML Structure:", doc.body ? doc.body.innerHTML.substring(0, 500) + "..." : "No body element found");
+                    console.log("Number of DL elements:", doc.querySelectorAll('DL').length);
+                    console.log("Number of DT elements:", doc.querySelectorAll('DT').length);
+                    console.log("Number of A elements:", doc.querySelectorAll('A').length);
+                    
+                    // Try to output one link for debugging
+                    const firstLink = doc.querySelector('A');
+                    if (firstLink) {
+                      console.dir(firstLink);
+                      console.log("First link href:", firstLink.getAttribute('href'));
+                      console.log("First link text:", firstLink.textContent);
+                    } else {
+                      console.warn("No links (<A> tags) found in the HTML file!");
+                    }
+
+                    // Robust HTML bookmark parser
+                    function parseBookmarksFromHTML(doc: Document): { bookmarks: any[]; categories: string[]; categoryMap: {[key: string]: string} } {
+                      const bookmarks: any[] = [];
+                      const categories = new Set<string>(['Uncategorized']);
+                      const categoryMap: {[key: string]: string} = {
+                        'Uncategorized': 'uncategorized'
+                      };
+                      
+                      // Extract all bookmark links with their folder structure
+                      const allLinks = Array.from(doc.querySelectorAll('A'));
+                      console.log(`Found ${allLinks.length} links total`);
+                      
+                      if (allLinks.length === 0) {
+                        throw new Error("No bookmarks found in the HTML file.");
+                      }
+                      
+                      // Process all links directly without trying to reconstruct folders
+                      allLinks.forEach((link) => {
+                        const href = link.getAttribute('href');
+                        const title = link.textContent?.trim() || 'Untitled';
+                        
+                        // Skip links without hrefs or non-http(s) URLs
+                        if (!href || (!href.startsWith('http://') && !href.startsWith('https://'))) {
+                          console.log(`Skipping link: ${title} - Invalid URL: ${href}`);
+                          return;
+                        }
+                        
+                        // Create a bookmark object
+                        const bookmark = {
+                          id: crypto.randomUUID(),
+                          type: 'bookmark',
+                          title: title,
+                          url: href,
+                          categoryId: 'uncategorized', // Default to uncategorized
+                          createdAt: new Date().toISOString(),
+                          updatedAt: new Date().toISOString(),
+                          tags: [] as string[],
+                          parentId: null,
+                          description: '',
+                          icon: ''
+                        };
+                        
+                        // Find parent folder if any
+                        let parent = link.closest('DL')?.previousElementSibling;
+                        if (parent && parent.tagName === 'DT') {
+                          const folderHeader = parent.querySelector('H3');
+                          if (folderHeader) {
+                            const folderName = folderHeader.textContent?.trim() || 'Unnamed Folder';
+                            
+                            // Create category ID from folder name
+                            const categoryId = folderName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                            
+                            // Add to categories if it doesn't exist
+                            if (!categoryMap[folderName]) {
+                              categoryMap[folderName] = categoryId;
+                              categories.add(folderName);
+                            }
+                            
+                            // Update bookmark with category ID
+                            bookmark.categoryId = categoryId;
+                            console.log(`Assigning bookmark "${title}" to category "${folderName}"`);
+                          }
+                        }
+                        
+                        bookmarks.push(bookmark);
+                      });
+                      
+                      console.log(`Processed ${bookmarks.length} valid bookmarks`);
+                      console.log(`Extracted ${categories.size} categories`);
+                      
+                      return { 
+                        bookmarks, 
+                        categories: Array.from(categories),
+                        categoryMap
+                      };
+                    }
+
+                    const result = parseBookmarksFromHTML(doc);
+                    const newBookmarks = result.bookmarks;
+                    const newCategories = result.categories;
+                    const categoryMap = result.categoryMap;
+                    
+                    console.log(`Parsed ${newBookmarks.length} bookmarks and ${newCategories.length} categories`);
+                    console.log("Sample bookmarks:", newBookmarks.slice(0, 3));
+                    console.log("Categories:", newCategories);
+                    console.log("Category map:", categoryMap);
+
+                    // Get existing bookmarks and categories
+                    const { bookmarks = [], bookmark_categories = [] } = await chrome.storage.local.get(['bookmarks', 'bookmark_categories']);
+                    console.log(`Got ${bookmarks.length} existing bookmarks and ${bookmark_categories.length} categories`);
+
+                    // Create any missing categories
+                    const existingCategoryNames = new Set(bookmark_categories.map((cat: any) => cat.name));
+                    const categoriesToAdd = [];
+                    
+                    for (const categoryName of newCategories) {
+                      if (categoryName !== 'Uncategorized' && !existingCategoryNames.has(categoryName)) {
+                        // Generate a random color for the category
+                        const colors = ['red', 'green', 'blue', 'purple', 'yellow', 'pink', 'orange', 'teal'];
+                        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+                        
+                        categoriesToAdd.push({
+                          id: categoryMap[categoryName],
+                          name: categoryName,
+                          color: randomColor
+                        });
+                      }
+                    }
+                    
+                    // Add new categories
+                    if (categoriesToAdd.length > 0) {
+                      console.log(`Adding ${categoriesToAdd.length} new categories`);
+                      const updatedCategories = [...bookmark_categories, ...categoriesToAdd];
+                      await chrome.storage.local.set({ bookmark_categories: updatedCategories });
+                    }
+
+                    // Verify we have bookmarks to add
+                    if (newBookmarks.length === 0) {
+                      console.warn("No bookmarks were parsed from the HTML file!");
+                      toast.error('No bookmarks found in the HTML file. Make sure it has the correct format.');
+                      return;
+                    }
+
+                    // Check for duplicate bookmarks by URL
+                    const existingUrls = new Set(bookmarks.map((bm: any) => bm.url));
+                    const duplicates: any[] = [];
+                    const uniqueBookmarks: any[] = [];
+
+                    // Filter out duplicates
+                    newBookmarks.forEach(bookmark => {
+                      if (existingUrls.has(bookmark.url)) {
+                        duplicates.push(bookmark);
+                      } else {
+                        uniqueBookmarks.push(bookmark);
+                        existingUrls.add(bookmark.url); // Add to set to prevent duplicates within the import
+                      }
+                    });
+
+                    console.log(`Found ${duplicates.length} duplicate bookmarks that will be skipped`);
+                    console.log(`Adding ${uniqueBookmarks.length} unique bookmarks`);
+
+                    // Merge and save bookmarks
+                    const updatedBookmarks = [...bookmarks, ...uniqueBookmarks];
+                    await chrome.storage.local.set({
+                      bookmarks: updatedBookmarks
+                    });
+                    
+                    // Double check that the save worked
+                    const check = await chrome.storage.local.get(['bookmarks']);
+                    console.log(`Storage verification: ${check.bookmarks.length} bookmarks saved`);
+                    
+                    // Successfully saved - now refresh without reloading
+                    const message = uniqueBookmarks.length > 0
+                      ? `Successfully imported ${uniqueBookmarks.length} bookmarks from HTML!${duplicates.length > 0 ? ` (${duplicates.length} duplicates skipped)` : ''}`
+                      : `No new bookmarks imported. All ${duplicates.length} bookmarks already exist.`;
+
+                    toast.success(message);
+                    
+                    // Dispatch custom event for other components to refresh
+                    const event = new CustomEvent('bookmarks-updated');
+                    document.dispatchEvent(event);
+                    
+                    // Force page refresh to ensure all components update
+                    setTimeout(() => {
+                      window.location.reload();
+                    }, 500);
+                  } catch (error) {
+                    console.error('Import error:', error);
+                    toast.error('Failed to import bookmarks. Please check the file format and console for details.');
+                  }
+                }}
               />
             </label>
           </div>

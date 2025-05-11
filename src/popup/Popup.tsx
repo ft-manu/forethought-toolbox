@@ -4,7 +4,6 @@ import { AddBookmark } from '@/components/AddBookmark';
 import { CategoryManager } from '@/components/CategoryManager';
 import { SettingsModal } from '@/components/SettingsModal';
 import { useBookmarks } from '@/hooks/useBookmarks';
-import { useCategories } from '@/hooks/useCategories';
 import { BellIcon } from '@heroicons/react/24/outline';
 import { Toaster } from 'react-hot-toast';
 import { BookmarkNode } from '@/types/bookmark';
@@ -13,7 +12,6 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import { BookmarkTree } from '@/components/BookmarkTree';
-import { BookmarkService } from '@/services/bookmarkService';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 
@@ -53,7 +51,6 @@ const DashboardView: React.FC<{ setToast: (toast: { message: string; type: 'succ
   const [clickStats, setClickStats] = useState<[string, number, string][]>([]);
   const [recentPage, setRecentPage] = useState(1);
   const [clickedPage, setClickedPage] = useState(1);
-  const { refresh: refreshCategories } = useCategories();
   const [categories, setCategories] = useState<BookmarkCategory[]>([]);
 
   useEffect(() => {
@@ -266,63 +263,43 @@ const DashboardView: React.FC<{ setToast: (toast: { message: string; type: 'succ
               type="file"
               accept="application/json"
               className="hidden"
+              multiple
               onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
 
-                const reader = new FileReader();
-                reader.onload = async (e) => {
-                  if (!e.target?.result) return;
-                  try {
-                    const backupData = JSON.parse(e.target.result as string);
-                    
-                    // Validate backup data structure
-                    if (!backupData || typeof backupData !== 'object') {
-                      throw new Error('Invalid backup file format');
-                    }
+                let updates: { [key: string]: any } = {};
+                for (const file of files) {
+                  const content = await file.text();
+                  const data = JSON.parse(content);
 
-                    // Store all updates in an object
-                    const updates: { [key: string]: any } = {};
-
-                    // Restore bookmarks if present
-                    if (Array.isArray(backupData.bookmarks)) {
-                      updates.bookmarks = backupData.bookmarks;
-                    }
-
-                    // Restore categories if present
-                    if (Array.isArray(backupData.categories)) {
-                      // First, clear existing categories
-                      const existingCategories = await BookmarkService.getCategories();
-                      for (const category of existingCategories) {
-                        await BookmarkService.deleteCategory(category.id);
-                      }
-                      // Then add all categories from backup
-                      for (const category of backupData.categories) {
-                        await BookmarkService.addCategory({
-                          name: category.name,
-                          color: category.color,
-                          icon: category.icon
-                        });
-                      }
-                      // Store categories in local storage
-                      updates.bookmark_categories = backupData.categories;
-                    }
-
-                    // Update all data at once
-                    await chrome.storage.local.set(updates);
-
-                    // Refresh categories to update the UI
-                    await refreshCategories();
-
-                    setToast({ message: 'Backup restored successfully!', type: 'success' });
-                    // Force a reload to update all views
-                    window.location.reload();
-                  } catch (error) {
-                    console.error('Restore error:', error);
-                    setToast({ message: 'Failed to restore backup. Please check the file format.', type: 'error' });
+                  // Bookmarks
+                  if (Array.isArray(data.bookmarks)) {
+                    updates.bookmarks = data.bookmarks;
                   }
-                };
-                reader.readAsText(file);
+                  // Categories (accept both keys)
+                  if (Array.isArray(data.categories)) {
+                    updates.bookmark_categories = data.categories;
+                  }
+                  if (Array.isArray(data.bookmark_categories)) {
+                    updates.bookmark_categories = data.bookmark_categories;
+                  }
+                  // Custom pages
+                  if (Array.isArray(data.retoolPages)) {
+                    updates.retoolPages = data.retoolPages;
+                  }
+                  if (Array.isArray(data.notionPages)) {
+                    updates.notionPages = data.notionPages;
+                  }
+                  // Click stats
+                  if (data.bookmarkClicks) {
+                    updates.bookmarkClicks = data.bookmarkClicks;
+                  }
+                }
+
+                await chrome.storage.local.set(updates);
+                setToast({ message: 'Backup restored successfully!', type: 'success' });
+                window.location.reload();
               }}
             />
           </label>
@@ -486,6 +463,7 @@ export const Popup: React.FC = () => {
   const [viewMode, setViewMode] = useState<'table' | 'card' | 'tree'>('table');
   const [retoolPages, setRetoolPages] = useState<CustomPage[]>([]);
   const [notionPages, setNotionPages] = useState<CustomPage[]>([]);
+  const bookmarkTableRef = useRef<any>(null);
 
   // Load saved view and dropdown states on mount
   useEffect(() => {
@@ -839,8 +817,28 @@ export const Popup: React.FC = () => {
     chrome.storage.local.set({ notionPages });
   }, [notionPages]);
 
+  // Restore showAdd state on mount
+  useEffect(() => {
+    chrome.storage.local.get(['popup_showAdd'], (data) => {
+      if (typeof data.popup_showAdd === 'boolean') {
+        setShowAdd(data.popup_showAdd);
+      }
+    });
+  }, []);
+
+  // Persist showAdd state on change
+  useEffect(() => {
+    chrome.storage.local.set({ popup_showAdd: showAdd });
+  }, [showAdd]);
+
   // Clear any existing toast
   const clearToast = () => setToast(null);
+
+  const handleRefreshCategories = () => {
+    if (bookmarkTableRef.current && bookmarkTableRef.current.refreshCategories) {
+      bookmarkTableRef.current.refreshCategories();
+    }
+  };
 
   return (
     <div className={`w-[800px] h-[600px] flex ${theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'} font-sans`} style={{ overflow: 'hidden' }}>
@@ -1106,6 +1104,7 @@ export const Popup: React.FC = () => {
               ) : (
                 <>
                   <BookmarkTable
+                    ref={bookmarkTableRef}
                     bookmarks={bookmarks.filter(b => b.parentId === selectedFolderId && b.type === 'bookmark')}
                     onUpdate={async (id, data) => { await updateBookmarkNode(id, data); }}
                     onDelete={handleDeleteWithUndo}
@@ -1123,7 +1122,7 @@ export const Popup: React.FC = () => {
                     clearToast={() => setToast(null)}
                     onBatchDeleteWithUndo={handleBatchDeleteWithUndo}
                   />
-                  <CategoryManager />
+                  <CategoryManager onCategoryChange={handleRefreshCategories} />
                 </>
               )}
             </div>
