@@ -28,7 +28,21 @@ A powerful browser extension for advanced bookmark management, fuzzy search, wor
 
 ---
 
-## 🛠️ Installation
+## 🏁 Quick Install (No Build Required)
+
+**For most users who just want to use the extension:**
+
+1. **Download the latest release ZIP** from [GitHub Releases](https://github.com/ft-manu/forethought-toolbox/releases) or use the green "Code" button > "Download ZIP" for the main branch.
+2. **Extract** the ZIP file on your computer.
+3. **Go to** `chrome://extensions/`
+4. **Enable** "Developer mode"
+5. **Click** "Load unpacked" and select the extracted folder (should contain `manifest.json`).
+
+---
+
+## 🛠️ Developer Install (Build Required)
+
+**For developers or advanced users who want to build from source:**
 
 1. **Clone the repository:**
    ```sh
