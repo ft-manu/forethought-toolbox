@@ -32,7 +32,7 @@ A powerful browser extension for advanced bookmark management, fuzzy search, wor
 
 **For most users who just want to use the extension:**
 
-1. **Download the latest release ZIP** from here: [forethought-toolbox.zip](https://github.com/user-attachments/files/20150692/forethought-toolbox.zip)
+1. **Download the latest release ZIP** from here: [forethought-toolbox.zip](https://github.com/user-attachments/files/20151246/forethought-toolbox.zip)
 2. **Extract** the ZIP file on your computer.
 3. **Go to** `chrome://extensions/`
 4. **Enable** "Developer mode"
