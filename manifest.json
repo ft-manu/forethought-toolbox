@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Forethought Toolbox",
+  "description": "Bookmark Manager + Global Search with Command+K",
+  "version": "1.0",
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "commands",
+    "downloads"
+  ],
+  "action": {
+    "default_popup": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "commands": {
+    "toggle-command-k": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Toggle Command+K search modal"
+    }
+  },
+  "icons": {
+    "16": "default-favicon.png",
+    "32": "default-favicon.png",
+    "48": "default-favicon.png",
+    "128": "default-favicon.png"
+  }
+}

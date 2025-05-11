@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Forethought Toolbox",
+  "version": "1.0.0",
+  "description": "A powerful bookmark management and productivity tool for organizing and accessing your bookmarks efficiently",
+  "author": "Your Name",
+  "homepage_url": "https://github.com/yourusername/forethought-toolbox",
+  "permissions": [
+    "storage",
+    "bookmarks",
+    "downloads",
+    "tabs"
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "default-favicon.png",
+      "32": "default-favicon.png",
+      "48": "default-favicon.png",
+      "128": "default-favicon.png"
+    }
+  },
+  "icons": {
+    "16": "default-favicon.png",
+    "32": "default-favicon.png",
+    "48": "default-favicon.png",
+    "128": "default-favicon.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"]
+    }
+  ],
+  "minimum_chrome_version": "88"
+} 
